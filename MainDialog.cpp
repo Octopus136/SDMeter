@@ -57,11 +57,12 @@ BEGIN_MESSAGE_MAP(MainDialog, CDialogEx)
     ON_COMMAND(ID_SET_DISTANCE, &MainDialog::OnBnClickedButton7)
     ON_COMMAND(ID_EXIT, &MainDialog::ExitFunction)
     ON_COMMAND(ID_ABOUT, &MainDialog::AboutFunction)
+    ON_COMMAND(ID_CLEAR_BUFFER, &MainDialog::ClearText)
     // TODO
     ON_COMMAND(ID_READ_FILE, &MainDialog::TODOFunction)
     ON_COMMAND(ID_RECORD_FILE, &MainDialog::TODOFunction)
     ON_COMMAND(ID_BEGIN_RECORD, &MainDialog::TODOFunction)
-    ON_COMMAND(ID_CLEAR_BUFFER, &MainDialog::TODOFunction)
+    ON_COMMAND(ID_END_RECORD, &MainDialog::TODOFunction)
 END_MESSAGE_MAP()
 
 
@@ -113,6 +114,7 @@ BOOL MainDialog::OnInitDialog()
     NotificationFilter.dbcc_classguid = GUID_DEVINTERFACE_COMPORT; // COM设备
 
     m_hDeviceNotify = RegisterDeviceNotification(m_hWnd, &NotificationFilter, DEVICE_NOTIFY_WINDOW_HANDLE);
+
     // 读取ini
     std::ifstream infile("SDMeter.ini");
     if (infile.is_open()) {
@@ -154,20 +156,30 @@ BOOL MainDialog::OnInitDialog()
         d = std::stod(config["d"]);
     }
     catch (...) {
-        d = 0.5;
+        d = 0.8;
     }
 
     try {
-        TEMPFACTOR = std::stod(config["TEMPFACTOR"]);
+        TEMPFACTOR = std::stod(config["TempFactor"]);
     }
     catch (...) {
-        TEMPFACTOR = 0;
+        TEMPFACTOR = -0.848;
     }
 
-    std::wostringstream wos;
+    try {
+        Wt = std::stod(config["Temperature"]);
+    }
+    catch (...) {
+        Wt = 25.0;
+    }
+
+    std::wostringstream wos, dwos;
     wos << L"d=" << std::fixed << std::setprecision(3) << d << L"m";
     std::wstring formatted_d = wos.str();
     GetDlgItem(IDC_BUTTON7)->SetWindowTextW(formatted_d.c_str());
+
+    dwos << std::fixed << std::setprecision(1) << Wt << L"℃";
+    GetDlgItem(IDC_STATIC15)->SetWindowTextW(dwos.str().c_str());
 
     // 菜单句柄
     pMenu = GetMenu();
@@ -182,6 +194,9 @@ BOOL MainDialog::OnInitDialog()
     HICON hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
     SetIcon(hIcon, TRUE);
     SetIcon(hIcon, FALSE);
+
+    // 缓冲区绑定
+    pEdit = (CEdit*)GetDlgItem(IDC_EDIT1);
 
 	return TRUE;
 }
@@ -306,18 +321,26 @@ inline void MainDialog::STOP() {
     Button_CTRL(1);
 }
 
+bool LoopInterrupt = false;
+int begin_t = -1;
+
+void AdjustButton(MainDialog* pWnd, bool op) {
+    pWnd->GetDlgItem(IDC_BUTTON1)->EnableWindow(op);
+    pWnd->GetDlgItem(IDC_BUTTON2)->EnableWindow(op);
+    pWnd->GetDlgItem(IDC_BUTTON3)->EnableWindow(op);
+    pWnd->GetDlgItem(IDC_BUTTON4)->EnableWindow(op);
+}
+
 enum class AdjustSignal {
     IDLE = 0,
-    FINISHED = 1,
-    NEED_W0 = 2,
-    NEED_W1 = 3,
-    ADJUSTING = 4,
+    NEED_W0 = 1,
+    NEED_W1 = 2,
+    ADJUSTING = 3,
+    CLEAN_W0 = 4,
+    CLEAN_W1 = 5,
+    CLEANING = 6,
 };
-
-bool LoopInterrupt = false;
-int AdjustW0 = -1, AdjustW1 = -1, AdjustWt = -1;
-int begin_t = -1;
-AdjustSignal signal = AdjustSignal::IDLE;
+AdjustSignal adsignal = AdjustSignal::IDLE;
 
 UINT MainLoop(LPVOID pParam) {
     MainDialog* pWnd = (MainDialog*)pParam;
@@ -326,7 +349,7 @@ UINT MainLoop(LPVOID pParam) {
     std::vector<double> vV(4, 0.0), vm(4, 0.0), vU(4, 0.0), vWt(4, 0.0), vD(4, 0.0);
     double meanV = 0.0, meanm = 0.0, meanU = 0.0, meanWt = 0.0, meanD = 0.0;
     bool canoutput = false;
-    bool needw0 = false, needw1 = false;
+    bool needw0 = false, needw1 = false, cleanw0 = false, cleanw1 = false;
     while (!LoopInterrupt) {
         DWORD bytesread = 0;
         pWnd->cdriver.RecvData(data, bytesread);
@@ -337,8 +360,8 @@ UINT MainLoop(LPVOID pParam) {
             int current = data[3] << 8 | data[4];
             int temp = data[5] << 8 | data[6]; // 温度
             int real = current - base; // 实际值
-            // double t = 1.0 / (1.0 / 3950.0 * std::log((3.0 / 5.0 * temp) / (1024.0 - temp)) + 1.0 / 298.15) - 273.15; // 实际温度
-            double t = -1.0;
+            double t = 1.0 / (1.0 / 3950.0 * std::log((3.0 / 5.0 * temp) / (4096.0 - temp)) + 1.0 / 298.15) - 273.15; // 实际温度
+            //double t = -1.0;
             int nTempAdj = (int)((pWnd->Wt - t) * pWnd->TEMPFACTOR + 0.5); // 温度补偿
             double W = 1.0 * pWnd->W1_th / (pWnd->W1 - pWnd->W0) * (real + nTempAdj - pWnd->W0); // 读数
             double V = (1.0 - W / (1.0 * pWnd->W1_th)) * 100; // 减光率，单位%
@@ -347,7 +370,7 @@ UINT MainLoop(LPVOID pParam) {
                 m = std::log10(1.0 * (pWnd->W1 - pWnd->W0) / (1.0 / (pWnd->W0 - real - nTempAdj + 100.0))) * 10 / pWnd->d; // W0 很大的时候
             else 
                 m = std::log10(1.0 * (pWnd->W1 - pWnd->W0) / (real + nTempAdj - pWnd->W0)) * 10 / pWnd->d; // 正常的时候
-            double U = W * 2048 / 32768; // 毫伏数，单位mV
+            double U = W * 3300 / 4096; // 毫伏数，单位mV
             meanV += 0.25 * (V - vV[timestamp % 4]);
             meanm += 0.25 * (m - vm[timestamp % 4]);
             meanU += 0.25 * (U - vU[timestamp % 4]);
@@ -359,29 +382,66 @@ UINT MainLoop(LPVOID pParam) {
             vU[timestamp % 4] = U;
             vD[timestamp % 4] = real;
             timestamp++;
-            if (signal == AdjustSignal::ADJUSTING && timestamp - begin_t >= 3) {
-                signal = AdjustSignal::FINISHED;
+            if (adsignal == AdjustSignal::CLEANING && timestamp - begin_t > 4) {
                 begin_t = -1;
-                if (needw0) AdjustW0 = meanD;
-                else AdjustW1 = meanD;
+                if (cleanw0) {
+                    pWnd->ShowAdjustText(L"烟密计全吸收清除成功");
+                }
+                else {
+                    pWnd->ShowAdjustText(L"烟密计全反射清除成功");
+                }
+                cleanw0 = false;
+                cleanw1 = false;
+                adsignal = AdjustSignal::IDLE;
+                AdjustButton(pWnd, TRUE);
+            }
+            if (adsignal == AdjustSignal::ADJUSTING && timestamp - begin_t > 4) {
+                begin_t = -1;
+                if (needw0) {
+                    pWnd->ShowAdjustText(L"烟密计全吸收校准成功");
+                }
+                else {
+                    pWnd->ShowAdjustText(L"烟密计全反射校准成功");
+                }
+                pWnd->Wt = meanWt;
                 needw0 = false;
                 needw1 = false;
+                adsignal = AdjustSignal::IDLE;
+                AdjustButton(pWnd, TRUE);
             }
-            if (signal == AdjustSignal::NEED_W0 || signal == AdjustSignal::NEED_W1) { // 需要校准
-                if (signal == AdjustSignal::NEED_W0) needw0 = true;
-                else needw1 = true;
-                signal = AdjustSignal::ADJUSTING;
+            if (adsignal == AdjustSignal::NEED_W0) {
+                needw0 = true;
+                pWnd->W0 = meanD;
                 begin_t = timestamp;
+                adsignal = AdjustSignal::ADJUSTING;
+            }
+            else if (adsignal == AdjustSignal::NEED_W1) {
+                needw1 = true;
+                pWnd->W1 = meanD;
+                begin_t = timestamp;
+                adsignal = AdjustSignal::ADJUSTING;
+            }
+            else if (adsignal == AdjustSignal::CLEAN_W0) {
+                pWnd->W0 = 0;
+                begin_t = timestamp;
+                adsignal = AdjustSignal::CLEANING;
+
+            }
+            else if (adsignal == AdjustSignal::CLEAN_W1) {
+                pWnd->W1 = pWnd->W1_th;
+                begin_t = timestamp;
+                adsignal = AdjustSignal::CLEANING;
             }
             if (timestamp == 4) canoutput = 1;
             if (canoutput) {
                 std::wostringstream Vwos, mwos, twos, Uwos, Dwos, Wwos;
-                Vwos << std::fixed << std::setprecision(2) << meanV;
-                mwos << std::fixed << std::setprecision(3) << meanm;
+                Vwos << std::fixed << std::setprecision(2) << min(max(0.00, meanV), 100.00);
+                mwos << std::fixed << std::setprecision(3) << max(0.00, meanm);
                 twos << std::fixed << std::setprecision(1) << meanWt << L"℃";
-                Uwos << std::fixed << std::setprecision(1) << meanU << L"mV";
+                Uwos << std::fixed << std::setprecision(1) << max(0.00, meanU) << L"mV";
                 Dwos << (int)meanD;
-                Wwos << (int)(1.0 * pWnd->W1_th / (pWnd->W1 - pWnd->W0) * (meanD + nTempAdj - pWnd->W0));
+                int iW = (int)(1.0 * pWnd->W1_th / (pWnd->W1 - pWnd->W0) * (meanD + nTempAdj - pWnd->W0));
+                Wwos << iW;
                 std::wstring formatted_V = Vwos.str(), formatted_m = mwos.str(), formatted_t = twos.str(), formatted_U = Uwos.str(), formatted_D = Dwos.str(), formatted_W = Wwos.str();
                 pWnd->GetDlgItem(IDC_STATIC12)->SetWindowTextW(formatted_V.c_str()); // 减光率
                 pWnd->GetDlgItem(IDC_STATIC13)->SetWindowTextW(formatted_m.c_str()); // 减光系数
@@ -389,64 +449,21 @@ UINT MainLoop(LPVOID pParam) {
                 pWnd->GetDlgItem(IDC_STATIC16)->SetWindowTextW(formatted_U.c_str()); // 毫伏
                 pWnd->GetDlgItem(IDC_STATIC17)->SetWindowTextW(formatted_D.c_str()); // 原始值
                 pWnd->GetDlgItem(IDC_STATIC14)->SetWindowTextW(formatted_W.c_str()); // 读数
+                std::wostringstream Editwos;
+                auto now = std::chrono::system_clock::now();
+                std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+                std::tm timeinfo{};
+                localtime_s(&timeinfo, &now_c);
+                wchar_t wbuffer[100];
+                std::wcsftime(wbuffer, sizeof(wbuffer) / sizeof(wchar_t), L"%Y-%m-%d %H:%M:%S", &timeinfo);
+                std::wstring wstr(wbuffer);
+                Editwos << L"减光率: " << std::fixed << std::setprecision(2) << min(max(0.00, meanV), 100.00) << L"% 减光系数: " << std::fixed << std::setprecision(3) << max(0.00, meanm) << L"dB/m 读数: " << iW << L" 温度: " << std::fixed << std::setprecision(1) << meanWt << L"℃ 毫伏: " << std::fixed << std::setprecision(1) << max(0.00, meanU) << L"mV 原始值: " << (int)meanD << L" " << wstr << L"\r\n";
+                pWnd->AppendText(Editwos.str().c_str());
             }
         }
     }
     delete[] data;
     return 0;
-}
-
-void AdjustButton(MainDialog* pWnd, bool op) {
-    pWnd->GetDlgItem(IDC_BUTTON1)->EnableWindow(op);
-    pWnd->GetDlgItem(IDC_BUTTON2)->EnableWindow(op);
-    pWnd->GetDlgItem(IDC_BUTTON3)->EnableWindow(op);
-    pWnd->GetDlgItem(IDC_BUTTON4)->EnableWindow(op);
-}
-
-UINT AdjustW0Thread(LPVOID pParam) {
-    MainDialog* pWnd = (MainDialog*)pParam;
-    AdjustButton(pWnd, FALSE);
-    signal = AdjustSignal::NEED_W0;
-    while (signal != AdjustSignal::FINISHED);
-    pWnd->W0 = AdjustW0;
-    AdjustW0 = -1;
-    signal = AdjustSignal::IDLE;
-    AdjustButton(pWnd, TRUE);
-    pWnd->ShowAdjustText(L"烟密计全吸收校准成功");
-    return TRUE;
-}
-
-UINT AdjustW1Thread(LPVOID pParam) {
-    MainDialog* pWnd = (MainDialog*)pParam;
-    AdjustButton(pWnd, FALSE);
-    signal = AdjustSignal::NEED_W1;
-    while (signal != AdjustSignal::FINISHED);
-    pWnd->W1 = AdjustW1;
-    AdjustW1 = -1;
-    signal = AdjustSignal::IDLE;
-    AdjustButton(pWnd, TRUE);
-    pWnd->ShowAdjustText(L"烟密计全反射校准成功");
-    return TRUE;
-}
-
-UINT ClearW0Thread(LPVOID pParam) {
-    MainDialog* pWnd = (MainDialog*)pParam;
-    AdjustButton(pWnd, FALSE);
-    Sleep(3000); // 显得好看
-    pWnd->W0 = 0;
-    AdjustButton(pWnd, TRUE);
-    pWnd->ShowAdjustText(L"烟密计全吸收清除成功");
-    return TRUE;
-}
-
-UINT ClearW1Thread(LPVOID pParam) {
-    MainDialog* pWnd = (MainDialog*)pParam;
-    AdjustButton(pWnd, FALSE);
-    Sleep(3000); // 显得好看
-    pWnd->W1 = pWnd->W1_th;
-    AdjustButton(pWnd, TRUE);
-    pWnd->ShowAdjustText(L"烟密计全反射清除成功");
-    return TRUE;
 }
 
 void MainDialog::OnBnClickedButton6()
@@ -475,9 +492,8 @@ void MainDialog::OnBnClickedButton5()
     }
     else {
         LoopInterrupt = true;
-        AdjustW0 = -1, AdjustW1 = -1, AdjustWt = -1;
         begin_t = -1;
-        signal = AdjustSignal::IDLE;
+        adsignal = AdjustSignal::IDLE;
         STOP();
     }
 }
@@ -489,12 +505,13 @@ BOOL MainDialog::DestroyWindow()
     oss << "d=" << std::fixed << std::setprecision(3) << this->d << std::endl;
     oss << "W0=" << std::fixed << std::setprecision(3) << this->W0 << std::endl;
     oss << "W1=" << std::fixed << std::setprecision(3) << this->W1 << std::endl; 
-    oss << "TEMPFACTOR=" << std::fixed << std::setprecision(3) << this->TEMPFACTOR << std::endl;
+    oss << "TempFactor=" << std::fixed << std::setprecision(3) << this->TEMPFACTOR << std::endl;
+    oss << "Temperature=" << std::fixed << std::setprecision(1) << this->Wt << std::endl;
     std::string content = oss.str();
 
     std::ofstream outFile("SDMeter.ini");
     if (outFile.is_open()) {
-        outFile << content << std::endl;
+        outFile << content;
         outFile.close();
     }
 
@@ -526,31 +543,33 @@ void MainDialog::OnTimer(UINT_PTR nIDEvent)
 void MainDialog::OnBnClickedButton2() // W0校准
 {
     ShowAdjustText(L"烟密计开始全吸收校准");
-    CWinThread* m_pAdjustW0Thread;
-    m_pAdjustW0Thread = AfxBeginThread(AdjustW0Thread, this);
+    AdjustButton(this, FALSE);
+    adsignal = AdjustSignal::NEED_W0;
 }
 
 void MainDialog::OnBnClickedButton4() // W1校准
 {
     ShowAdjustText(L"烟密计开始全反射校准");
-    CWinThread* m_pAdjustW1Thread;
-    m_pAdjustW1Thread = AfxBeginThread(AdjustW1Thread, this);
+    AdjustButton(this, FALSE);
+    adsignal = AdjustSignal::NEED_W1;
 }
 
 
 void MainDialog::OnBnClickedButton1() // W0清除
 {
     ShowAdjustText(L"烟密计开始全吸收清除");
-    CWinThread* m_pClearW0Thread;
-    m_pClearW0Thread = AfxBeginThread(ClearW0Thread, this);
+    AdjustButton(this, FALSE);
+    adsignal = AdjustSignal::CLEAN_W0;
+    this->W0 = 0;
 }
 
 
 void MainDialog::OnBnClickedButton3() // W1清除
 {
     ShowAdjustText(L"烟密计开始全反射清除");
-    CWinThread* m_pClearW1Thread;
-    m_pClearW1Thread = AfxBeginThread(ClearW1Thread, this);
+    AdjustButton(this, FALSE);
+    adsignal = AdjustSignal::CLEAN_W1;
+    this->W1 = this->W1_th;
 }
 
 void MainDialog::TODOFunction()
@@ -566,4 +585,14 @@ void MainDialog::ExitFunction()
 void MainDialog::AboutFunction()
 {
     MessageBox(this->AboutInformation.c_str(), _T("关于 烟雾光学密度计"), MB_ICONINFORMATION | MB_OK);
+}
+
+void MainDialog::AppendText(CString text) {
+    int currentTextLength = pEdit->GetWindowTextLength();
+    pEdit->SetSel(currentTextLength, currentTextLength);
+    pEdit->ReplaceSel(text);
+}
+
+void MainDialog::ClearText() {
+    pEdit->SetWindowTextW(_T(""));
 }

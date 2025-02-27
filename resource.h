@@ -121,6 +121,7 @@
 #define IDOK_P                          1049
 #define IDCANCEL_P                      1050
 #define IDC_STATIC_ADJ                  1051
+#define IDC_EDIT2                       1052
 #define ID_32771                        32771
 #define ID_32772                        32772
 #define ID_32773                        32773
@@ -158,7 +159,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        316
 #define _APS_NEXT_COMMAND_VALUE         32801
-#define _APS_NEXT_CONTROL_VALUE         1052
+#define _APS_NEXT_CONTROL_VALUE         1053
 #define _APS_NEXT_SYMED_VALUE           310
 #endif
 #endif
