@@ -86,6 +86,7 @@
 #define IDD_MAINDIALOG                  310
 #define IDR_MENU                        312
 #define IDD_PARAMSET                    313
+#define IDD_GETOTHERCOM                 314
 #define IDI_ICON1                       315
 #define IDC_STATIC1                     1005
 #define IDC_STATIC2                     1006
@@ -121,7 +122,12 @@
 #define IDOK_P                          1049
 #define IDCANCEL_P                      1050
 #define IDC_STATIC_ADJ                  1051
-#define IDC_EDIT2                       1052
+#define IDC_STATIC_C1                   1053
+#define IDC_STATIC_C2                   1054
+#define IDC_STATIC_C4                   1055
+#define IDOK_C                          1056
+#define IDCANCEL_C                      1057
+#define IDC_EDIT_C1                     1058
 #define ID_32771                        32771
 #define ID_32772                        32772
 #define ID_32773                        32773
@@ -159,7 +165,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        316
 #define _APS_NEXT_COMMAND_VALUE         32801
-#define _APS_NEXT_CONTROL_VALUE         1053
+#define _APS_NEXT_CONTROL_VALUE         1059
 #define _APS_NEXT_SYMED_VALUE           310
 #endif
 #endif

@@ -5,6 +5,7 @@
 #include "ParamSetDialog.h"
 #include <cmath>
 #include <chrono>
+#include "GetCOMDialog.h"
 
 // MainDialog 对话框
 
@@ -86,6 +87,8 @@ public:
 	double TEMPFACTOR = -0.848;
 	std::map<std::string, std::string> config;
 	afx_msg void OnCbnDropdownCombo();
+	int othercom = -1;
+	bool LoopInterrupt = false;
 
 	// 设备通知句柄
 	HDEVNOTIFY m_hDeviceNotify;
@@ -109,6 +112,8 @@ public:
 	afx_msg void OnBnClickedButton4();
 	afx_msg void OnBnClickedButton1();
 	afx_msg void OnBnClickedButton3();
+	afx_msg void OnCbnSelchangeCombo2();
+	int GetOtherCOM();
 
 	// 供菜单调用
 	afx_msg void ExitFunction();
@@ -122,6 +127,7 @@ public:
 	std::vector<std::wstring> Changelog = {
 		L"\nVersion 1.0\n1. 完成了本产品的主要逻辑，部分附加功能仍在开发中。\n"
 		L"\nVersion 1.1\n1. 左边的缓冲区支持写入信息和清除了。\n2. 温度计算和毫伏计算目前是正确的结果了。\n3. 更新了信号传递机制，校准不会被错误阻塞了。"
+		L"\nVersion 1.2\n1. 现在允许自定义端口号了。"
 	};
 	std::wstring AboutInformation = L"";
 

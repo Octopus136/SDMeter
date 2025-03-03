@@ -47,6 +47,8 @@ BEGIN_MESSAGE_MAP(MainDialog, CDialogEx)
     ON_BN_CLICKED(IDC_BUTTON4, &MainDialog::OnBnClickedButton4)
     ON_BN_CLICKED(IDC_BUTTON1, &MainDialog::OnBnClickedButton1)
     ON_BN_CLICKED(IDC_BUTTON3, &MainDialog::OnBnClickedButton3)
+    // 其他串口设置
+    ON_CBN_SELCHANGE(IDC_COMBO2, &MainDialog::OnCbnSelchangeCombo2)
     // 菜单命令
     ON_COMMAND(ID_BEGIN_EXECUTE, &MainDialog::OnBnClickedButton6)
     ON_COMMAND(ID_END_EXECUTE, &MainDialog::OnBnClickedButton5)
@@ -100,11 +102,12 @@ BOOL MainDialog::OnInitDialog()
     
     pComboBox = (CComboBox*)GetDlgItem(IDC_COMBO2);
     pComboBox->ResetContent();
-
+    int cnt = 0;
     for (const auto& item : devices) {
         std::wstring display_name = item.deviceName;
-        pComboBox->AddString(display_name.c_str());
+        pComboBox->InsertString(cnt++, display_name.c_str());
     }
+    pComboBox->InsertString(cnt, _T("其他"));
 
     // 设置COM设备监控
     DEV_BROADCAST_DEVICEINTERFACE NotificationFilter;
@@ -274,13 +277,14 @@ BOOL MainDialog::OnDeviceChange(UINT nType, DWORD_PTR dwData) {
     }
 
     pComboBox->ResetContent();
-
+    int cnt = 0;
     for (const auto& item : devices) {
         std::wstring display_name = item.deviceName;
-        pComboBox->AddString(display_name.c_str());
+        pComboBox->InsertString(cnt++, display_name.c_str());
     }
+    pComboBox->InsertString(cnt, _T("其他"));
 
-    pComboBox->SetCurSel(0);
+    pComboBox->SetCurSel(-1);
     return TRUE;
 }
 
@@ -321,7 +325,6 @@ inline void MainDialog::STOP() {
     Button_CTRL(1);
 }
 
-bool LoopInterrupt = false;
 int begin_t = -1;
 
 void AdjustButton(MainDialog* pWnd, bool op) {
@@ -350,7 +353,7 @@ UINT MainLoop(LPVOID pParam) {
     double meanV = 0.0, meanm = 0.0, meanU = 0.0, meanWt = 0.0, meanD = 0.0;
     bool canoutput = false;
     bool needw0 = false, needw1 = false, cleanw0 = false, cleanw1 = false;
-    while (!LoopInterrupt) {
+    while (!pWnd->LoopInterrupt) {
         DWORD bytesread = 0;
         pWnd->cdriver.RecvData(data, bytesread);
         if (bytesread != 8) continue;
@@ -469,15 +472,23 @@ UINT MainLoop(LPVOID pParam) {
 void MainDialog::OnBnClickedButton6()
 {
     int idx = pComboBox->GetCurSel();
-    idx = pComboBox->GetCount() - idx - 1;
-    if (cdriver.OpenDevice(idx) != ErrType::OK) {
+    std::vector<COMInfo> devices;
+    cdriver.GetDevices(devices);
+    int port;
+    if (idx == pComboBox->GetCount() - 1) {
+        port = this->othercom;
+    }
+    else {
+        port = devices[idx].com_id;
+    }
+    if (cdriver.OpenDevice(port) != ErrType::OK) {
         MessageBox(_T("打开指定串行通信口失败！"), _T("烟雾光学密度计"), MB_ICONWARNING | MB_OK);
     }
     else if (cdriver.SendData(0xAA) != ErrType::OK) {
         MessageBox(_T("打开指定串行通信口失败！"), _T("烟雾光学密度计"), MB_ICONWARNING | MB_OK);
     }
     else {
-        LoopInterrupt = false;
+        this->LoopInterrupt = false;
         BEGIN();
         CWinThread* m_pMainLoopThread;
         m_pMainLoopThread = AfxBeginThread(MainLoop, this);
@@ -487,11 +498,20 @@ void MainDialog::OnBnClickedButton6()
 void MainDialog::OnBnClickedButton5()
 {
     int idx = pComboBox->GetCurSel();
-    if (cdriver.ReleaseDevice(idx) != ErrType::OK) {
+    std::vector<COMInfo> devices;
+    cdriver.GetDevices(devices);
+    int port;
+    if (idx == pComboBox->GetCount() - 1) {
+        port = this->othercom;
+    }
+    else {
+        port = devices[idx].com_id;
+    }
+    if (cdriver.ReleaseDevice(port) != ErrType::OK) {
         MessageBox(_T("关闭指定串行通信口失败！"), _T("烟雾光学密度计"), MB_ICONWARNING | MB_OK);
     }
     else {
-        LoopInterrupt = true;
+        this->LoopInterrupt = true;
         begin_t = -1;
         adsignal = AdjustSignal::IDLE;
         STOP();
@@ -595,4 +615,35 @@ void MainDialog::AppendText(CString text) {
 
 void MainDialog::ClearText() {
     pEdit->SetWindowTextW(_T(""));
+}
+
+int MainDialog::GetOtherCOM() {
+    GetCOMDialog dialogCOM(this);
+    if (dialogCOM.DoModal() == IDOK) {
+        return dialogCOM.com;
+    }
+}
+
+void MainDialog::OnCbnSelchangeCombo2() {
+    CComboBox* pCombo = (CComboBox*)GetDlgItem(IDC_COMBO2);
+    int nIndex = pCombo->GetCurSel();
+
+    int cnt = pCombo->GetCount() - 1;
+
+    if (nIndex == cnt)
+    {
+        this->othercom = GetOtherCOM(); // 调用函数获取id
+
+        CString strText;
+        strText.Format(_T("COM%d（其他）"), this->othercom);
+
+        pCombo->DeleteString(cnt);
+        pCombo->InsertString(cnt, strText);
+        pCombo->SetCurSel(cnt);
+    }
+    else {
+        this->othercom = -1;
+        pCombo->DeleteString(cnt);
+        pCombo->InsertString(cnt, _T("其他"));
+    }
 }

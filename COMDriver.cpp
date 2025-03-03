@@ -79,16 +79,9 @@ void COMDriver::UpdateDevices() {
     LastError = ErrType::OK;
 }
 
-ErrType COMDriver::OpenDevice(int deviceidx) {
-    if (deviceidx < 0 || deviceidx >= devices.size()) {
-        LastError = ErrType::OPEN_ERROR;
-        return LastError;
-    }
-
-    // 获取COM端口信息
-    const COMInfo& info = devices[deviceidx];
+ErrType COMDriver::OpenDevice(int port) {
     //std::wstring portName = L"\\\\.\\COM" + std::to_wstring(info.com_id);
-    std::wstring portName = L"COM" + std::to_wstring(info.com_id);
+    std::wstring portName = L"COM" + std::to_wstring(port);
 
     // 打开串口
     hdevice = CreateFileW(
@@ -128,8 +121,8 @@ ErrType COMDriver::OpenDevice(int deviceidx) {
 
     COMMTIMEOUTS timeouts = { 0 };
     timeouts.ReadIntervalTimeout = 200;  // 关键参数：字节间隔超时
-    timeouts.ReadTotalTimeoutMultiplier = 0;
-    timeouts.ReadTotalTimeoutConstant = 0;
+    timeouts.ReadTotalTimeoutMultiplier = 20;
+    timeouts.ReadTotalTimeoutConstant = 200;
 
     if (!SetCommTimeouts(hdevice, &timeouts)) {
         CloseHandle(hdevice);
@@ -140,11 +133,7 @@ ErrType COMDriver::OpenDevice(int deviceidx) {
     return LastError = ErrType::OK;
 }
 
-ErrType COMDriver::ReleaseDevice(int deviceidx) {
-    if (deviceidx < 0 || deviceidx >= devices.size()) {
-        return LastError = ErrType::RELEASE_ERROR;
-    }
-
+ErrType COMDriver::ReleaseDevice(int port) {
     if (hdevice != INVALID_HANDLE_VALUE && hdevice != NULL) {
         if (!CloseHandle(hdevice)) {
             return LastError = ErrType::RELEASE_ERROR;
